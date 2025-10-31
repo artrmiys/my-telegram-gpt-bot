@@ -1,11 +1,14 @@
 import os
 import openai
 from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message
 from aiogram.enums import ParseMode
 from aiogram import F
+from aiogram.types import Message
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_KEY")
+CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
 
 bot = Bot(TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
@@ -52,6 +55,10 @@ async def ask_gpt(text):
 async def handle_text(message: types.Message):
     reply = await ask_gpt(message.text)
     await message.answer(reply)
+    try:
+        await bot.send_message(CHANNEL_ID, reply)
+    except Exception as e:
+        print('Не смог отправить в канал:', e)
 
 
 @dp.message(F.video_note)
