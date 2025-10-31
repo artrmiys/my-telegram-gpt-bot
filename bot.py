@@ -13,31 +13,31 @@ bot = Bot(TOKEN)
 dp = Dispatcher()
 
 def random_rating():
-    r = [
-        "1/10 — выглядишь как унылый сырник.",
-        "2/10 — жив, но на автопилоте.",
-        "3/10 — будто батарейка на 5%.",
-        "4/10 — можно лучше, но лень.",
-        "5/10 — стабильно-посредственно.",
-        "6/10 — почти живой человек.",
-        "7/10 — приятный лучик тепла.",
-        "8/10 — энерджайзер с харизмой.",
-        "9/10 — ты сияешь как лампочка в подъезде.",
-        "10/10 — легенда, икона, бог ракурсов."
+    ratings = [
+        "1/10 — как будто ты выдохся морально.",
+        "2/10 — живой, но без искры.",
+        "3/10 — унылая солянка души.",
+        "4/10 — нейтрально, но без блеска.",
+        "5/10 — стабильно-неплохо.",
+        "6/10 — есть жизнь в глазах.",
+        "7/10 — приятный светящийся шарик.",
+        "8/10 — солнечный зайчик человеческого вида.",
+        "9/10 — прям сияешь.",
+        "10/10 — ты просто бог ракурсов и харизмы."
     ]
-    return random.choice(r)
+    return random.choice(ratings)
 
 async def transcribe(file_id):
     file = await bot.get_file(file_id)
-    input_file = "input.ogg"
-    output_file = "output.wav"
-    await bot.download_file(file.file_path, input_file)
+    path = file.file_path
+    temp = "voice.ogg"
+    await bot.download_file(path, temp)
 
-    os.system(f"ffmpeg -y -i {input_file} -ar 16000 -ac 1 {output_file} > /dev/null 2>&1")
-
-    with open(output_file, "rb") as f:
+    with open(temp, "rb") as f:
         r = openai.Audio.transcribe("whisper-1", f)
-    return r["text"].strip()
+
+    text = r.get("text", "").strip()
+    return text if text else "..."
 
 async def ask_gpt(full_text):
     short = " ".join(full_text.split()[:4]) + "…" if len(full_text) > 40 else full_text
@@ -45,12 +45,13 @@ async def ask_gpt(full_text):
 
     prompt = f"""
 Ты — Ботэнский 🤖.
-Стиль: добродушная наглость, немного грубый юмор, без мата, но смело.
-Отвечай ровно в таком формате:
+Стиль: жизнерадостный, немного наглый, добродушно-грубоватый, **без мата**, иногда чуть ниже пояса, но мило.
+
+Отвечай всегда ровно так:
 
 Ботэнский 🤖:
-(короткая 1-2 строки реакция)
-Оценка: {mood}
+(2 строки остроумной реакции)
+Оценка настроения: {mood}
 
 Оригинал: "{short}"
 """
@@ -80,17 +81,18 @@ async def reply_channel(message: types.Message):
         return
 
     text = None
+
     if message.text:
         text = message.text
     elif message.voice or message.video_note:
-        fid = message.voice.file_id if message.voice else message.video_note.file_id
-        text = await transcribe(fid)
+        file_id = message.voice.file_id if message.voice else message.video_note.file_id
+        text = await transcribe(file_id)
 
     if not text:
         return
 
     reply = await ask_gpt(text)
-    await message.reply(reply)
+    await message.reply(reply, disable_notification=True)
 
 async def main():
     await dp.start_polling(bot)
