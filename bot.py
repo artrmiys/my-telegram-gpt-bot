@@ -15,19 +15,22 @@ async def ask_gpt(text: str) -> str:
     resp = client.chat.completions.create(
         model="gpt-5",
         messages=[
-            {"role": "system", "content": "Отвечай естественно, с характером и осмысленно."},
+            {"role": "system", "content": "Отвечай естественно и коротко."},
             {"role": "user", "content": text}
         ]
     )
     return resp.choices[0].message.content.strip()
 
 @dp.channel_post()
-async def handler(message: types.Message):
+async def on_channel_post(message: types.Message):
+    print("DEBUG CHAT ID:", message.chat.id, "EXPECTED:", CHANNEL_ID)
+
     if message.chat.id != CHANNEL_ID:
         return
+    
     if not message.text:
         return
-
+    
     reply = await ask_gpt(message.text)
     await message.reply(reply)
 
