@@ -1,23 +1,22 @@
 import asyncio
 import os
+import openai
 from aiogram import Bot, Dispatcher, types
-from openai import OpenAI
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_KEY")
 
+openai.api_key = OPENAI_KEY
+
 bot = Bot(TOKEN)
 dp = Dispatcher()
-client = OpenAI(api_key=OPENAI_KEY)
 
 async def ask_gpt(text):
-    response = client.chat.completions.create(
+    resp = openai.ChatCompletion.create(
         model="gpt-5",
-        messages=[
-            {"role": "user", "content": text}
-        ]
+        messages=[{"role": "user", "content": text}]
     )
-    return response.choices[0].message.content
+    return resp.choices[0].message["content"]
 
 @dp.message()
 async def on_message(message: types.Message):
