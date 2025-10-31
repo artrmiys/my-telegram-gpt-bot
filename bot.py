@@ -20,44 +20,37 @@ def trim(text, max_words=6):
 
 async def ask_gpt(text):
     prompt = f"""
-Ты — дерзкий, веселый и слегка токсичный друг.
-Отвечаешь максимум в две строки.
-В конце обязательно добавляешь "ботэнский 😈".
+Ты — дерзкий, радостный и немного злой друг.
+Отвечаешь в 2 строки, остро, уверенно, без воды.
+Всегда заканчиваешь фразой: "ботэнский 😈"
 
-Также ставь оценку настроения:
+После ответа пиши строку:
+Оценка: расклеился / норм / слишком радуешься / злой тигр
 
-- Если нытье → "Оценка: расклеился"
-- Нейтрально → "Оценка: норм"
-- Слишком радостный → "Оценка: слишком радуешься"
-- Агрессивный → "Оценка: злой тигр"
-
-Текст для анализа:
+Текст:
 {text}
 """
-
-    response = openai.ChatCompletion.create(
+    resp = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
+    return resp.choices[0].message["content"].strip()
 
-    return response.choices[0].message["content"].strip()
-
-# --- ЛИЧКА ---
+# Личка
 @dp.message(lambda m: m.chat.type == "private")
-async def private_handler(message: types.Message):
-    text = message.text or ""
-    reply = await ask_gpt(trim(text))
+async def private_message(message: types.Message):
+    reply = await ask_gpt(trim(message.text or ""))
     await message.answer(reply)
 
-# --- КРУЖОК / ВОЙС ---
+# Кружок / войс
 @dp.message(lambda m: m.voice or m.video_note)
 async def voice_handler(message: types.Message):
-    reply = await ask_gpt("кружок. эмоции анализирую.")
+    reply = await ask_gpt("кружок: распознать настроение")
     await message.answer(reply)
 
-# --- КАНАЛ (включая скрытые / без звука) ---
+# Канал — включая скрытые/без уведомления
 @dp.channel_post()
-async def channel_handler(message: types.Message):
+async def channel_post_handler(message: types.Message):
     text = message.text or message.caption or ""
     if not text:
         return
