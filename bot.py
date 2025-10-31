@@ -4,9 +4,9 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from openai import OpenAI
 
-# Убираем прокси из окружения (GitHub Actions их ставит)
-os.environ.pop("HTTP_PROXY", None)
-os.environ.pop("HTTPS_PROXY", None)
+# Полностью отключаем прокси (GitHub Actions добавляет их сам)
+for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]:
+    os.environ.pop(var, None)
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_KEY")
@@ -14,7 +14,6 @@ OPENAI_KEY = os.getenv("OPENAI_KEY")
 bot = Bot(TOKEN)
 dp = Dispatcher()
 
-# Новый правильный клиент
 client = OpenAI(api_key=OPENAI_KEY)
 
 async def ask_gpt(text):
@@ -29,10 +28,10 @@ async def ask_gpt(text):
 
 @dp.message(CommandStart())
 async def start(message: types.Message):
-    await message.answer("✅ Привет! Я работаю, пиши что угодно.")
+    await message.answer("✅ Привет! Я тут. Пиши текст — отвечу.")
 
 @dp.message()
-async def handle_all(message: types.Message):
+async def handle_message(message: types.Message):
     reply = await ask_gpt(message.text)
     await message.answer(reply)
 
