@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
   schedule:
-    - cron: "*/15 * * * *"   # перезапускается каждые 15 минут чтобы не падал
+    - cron: "*/15 * * * *"   # перезапуск каждые 15 минут на случай падения
 
 jobs:
   run:
@@ -22,9 +22,11 @@ jobs:
     - name: Install Dependencies
       run: pip install -r requirements.txt
 
-    - name: Run Bot
+    - name: Run Bot Forever
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
         CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-      run: python bot.py
+      run: |
+        python bot.py &
+        sleep infinity
