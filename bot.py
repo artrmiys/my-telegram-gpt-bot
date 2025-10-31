@@ -1,39 +1,36 @@
 import asyncio
 import os
-from openai import OpenAI
+import openai
 from aiogram import Bot, Dispatcher, types
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-OPENAI_KEY = os.getenv("OPENAI_KEY")
+openai.api_key = os.getenv("OPENAI_KEY")
 
-bot = Bot(TOKEN, parse_mode="HTML")
+bot = Bot(TOKEN)
 dp = Dispatcher()
-client = OpenAI(api_key=OPENAI_KEY)
 
-async def ask_gpt(text: str) -> str:
-    resp = client.chat.completions.create(
+async def ask_gpt(text):
+    resp = openai.chat.completions.create(
         model="gpt-5",
-        messages=[
-            {"role": "system", "content": "Отвечай естественно и понятно, без канцелярита."},
-            {"role": "user", "content": text}
-        ]
+        messages=[{"role": "user", "content": text}]
     )
-    return resp.choices[0].message.content.strip()
+    return resp.choices[0].message.content
 
-@dp.channel_post()
-async def on_channel_post(message: types.Message):
-    # Реальный текст может быть в caption
-    text = message.text or message.caption
-    if message.chat.id != CHANNEL_ID:
-        return
-    if not text:
+@dp.message()
+async def on_message(message: types.Message):
+    # Ловим любые сообщения в ЛИЧКЕ
+    if message.chat.type != "private":
         return
 
-    reply = await ask_gpt(text)
-    await message.reply(reply)
+    if not message.text:
+        await message.answer("Пришли текст 🙃")
+        return
+
+    reply = await ask_gpt(message.text)
+    await message.answer(reply)
 
 async def main():
+    print("✅ Bot started and waiting for messages...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
