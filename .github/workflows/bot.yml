@@ -2,9 +2,8 @@ name: Run Telegram Bot
 
 on:
   workflow_dispatch:
-  push:
   schedule:
-    - cron: "*/15 * * * *"   # перезапуск каждые 15 минут на случай падения
+    - cron: "*/15 * * * *"   # autorestart every 15 min
 
 jobs:
   run:
