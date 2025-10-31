@@ -3,13 +3,16 @@ name: Run Telegram Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"   # autorestart every 15 min
+    - cron: "*/15 * * * *"
 
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Kill previous bot processes
+      run: pkill -f bot.py || true
+
     - name: Checkout
       uses: actions/checkout@v4
 
