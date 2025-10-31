@@ -1,63 +1,62 @@
 import asyncio
 import os
+import tempfile
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
-from openai import OpenAI
+import openai
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_KEY")
+openai.api_key = OPENAI_KEY
 
-client = OpenAI(api_key=OPENAI_KEY)
 bot = Bot(TOKEN)
 dp = Dispatcher()
 
 STYLE_PROMPT = """
-Ты отвечаешь с чёрным юмором, но умно и метко.
-Ты не токсичный идиот, а **ироничный мудрец**, слегка обиженный жизнью.
-Ты иногда можешь троллить, но дружелюбно.
-Говоришь простым языком. Не длинно. Иногда с мем-референсами.
+Ты отвечаешь с черным, но умным юмором.
+Стиль: мудрый человек, который устал от всей этой хуйни, но все ещё почему-то жив.
+Коротко. По делу. Иногда с принижением, но без злобы.
 """
 
 async def ask_gpt(text):
-    response = client.chat.completions.create(
+    resp = openai.chat.completions.create(
         model="gpt-5",
         messages=[
             {"role": "system", "content": STYLE_PROMPT},
             {"role": "user", "content": text}
         ]
     )
-    return response.choices[0].message.content
+    return resp.choices[0].message.content
 
 async def transcribe_voice(file_path):
     with open(file_path, "rb") as f:
-        transcript = client.audio.transcriptions.create(
+        r = openai.audio.transcriptions.create(
             model="gpt-4o-transcribe",
             file=f
         )
-    return transcript.text
+    return r.text
 
 @dp.message(CommandStart())
 async def start(message: types.Message):
-    await message.answer("Ну привет. Пиши. Или кружок кидай — разберём, что ты там шепчешь в микрофон ночью.")
+    await message.answer("Ну давай. Пиши. Или кружок кидай. Я все слышу.")
 
 @dp.message()
-async def handle_message(message: types.Message):
+async def handle(message: types.Message):
     # Текст
     if message.text:
         reply = await ask_gpt(message.text)
         return await message.answer(reply)
 
-    # Голос / кружок
+    # Кружок / голос
     if message.voice or message.video_note:
         file_id = message.voice.file_id if message.voice else message.video_note.file_id
         file = await bot.get_file(file_id)
 
-        file_path = "voice.ogg"
-        await bot.download_file(file.file_path, file_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
+            await bot.download_file(file.file_path, tmp.name)
+            text = await transcribe_voice(tmp.name)
 
-        text = await transcribe_voice(file_path)
-        reply = await ask_gpt(f"*Расшифровка кружка:*\n{text}")
-
+        reply = await ask_gpt(f"Человек сказал в кружке:\n{text}")
         return await message.answer(reply)
 
 async def main():
