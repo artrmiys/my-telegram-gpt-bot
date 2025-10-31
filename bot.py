@@ -1,13 +1,14 @@
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums.parse_mode import ParseMode
-from openai import OpenAI
+import openai
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 OPENAI_KEY = os.environ.get("OPENAI_KEY")
-CHANNEL_ID = int(os.environ.get("CHANNEL_ID"))  # -10019...
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID"))
 
-client = OpenAI(api_key=OPENAI_KEY)
+openai.api_key = OPENAI_KEY
+
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
@@ -19,48 +20,48 @@ def trim(text, max_words=6):
 
 async def ask_gpt(text):
     prompt = f"""
-Ты — веселый, дерзкий, токсично-ласковый аналитик настроения.
+Ты — дерзкий, веселый и слегка токсичный друг.
+Отвечаешь максимум в две строки.
+В конце обязательно добавляешь "ботэнский 😈".
 
-Говоришь КОРОТКО: максимум 2 строки.
-Если человек ныл — говори прямо: "братан, ты расклеился, соберись".
-Если слишком радуется — подъеби чуть, приземли.
-Всегда добавляй слово "ботэнский 😈" в конце.
+Также ставь оценку настроения:
 
-Дай вывод в формате:
-Комментарий + перенос строки
-Оценка: (очень плохо / плохо / норм / хорошо / слишком радостный)
+- Если нытье → "Оценка: расклеился"
+- Нейтрально → "Оценка: норм"
+- Слишком радостный → "Оценка: слишком радуешься"
+- Агрессивный → "Оценка: злой тигр"
 
-Текст:
+Текст для анализа:
 {text}
 """
 
-    resp = client.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
-    return resp.choices[0].message.content.strip()
+
+    return response.choices[0].message["content"].strip()
 
 # --- ЛИЧКА ---
 @dp.message(lambda m: m.chat.type == "private")
-async def dm(message: types.Message):
+async def private_handler(message: types.Message):
     text = message.text or ""
     reply = await ask_gpt(trim(text))
     await message.answer(reply)
 
-# --- КРУЖКИ ---
+# --- КРУЖОК / ВОЙС ---
 @dp.message(lambda m: m.voice or m.video_note)
-async def voice(message: types.Message):
-    reply = await ask_gpt("кружок пойман, анализирую вайб...")
+async def voice_handler(message: types.Message):
+    reply = await ask_gpt("кружок. эмоции анализирую.")
     await message.answer(reply)
 
-# --- ПОСТЫ В КАНАЛЕ (включая скрытые, без уведомлений, автоматические) ---
+# --- КАНАЛ (включая скрытые / без звука) ---
 @dp.channel_post()
-async def channel_post(message: types.Message):
+async def channel_handler(message: types.Message):
     text = message.text or message.caption or ""
-    if not text.strip():
+    if not text:
         return
     reply = await ask_gpt(trim(text))
-
     await bot.send_message(
         chat_id=CHANNEL_ID,
         text=reply,
@@ -68,7 +69,7 @@ async def channel_post(message: types.Message):
     )
 
 async def main():
-    print("Ботэнский взлетел 😈")
+    print("ботэнский взлетел 😈")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
