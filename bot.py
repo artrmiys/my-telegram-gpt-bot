@@ -13,7 +13,7 @@ dp = Dispatcher()
 
 async def ask_gpt(text):
     resp = openai.ChatCompletion.create(
-        model="gpt-5",
+        model="gpt-4o-mini",
         messages=[{"role": "user", "content": text}]
     )
     return resp.choices[0].message["content"]
