@@ -1,85 +1,75 @@
 import os
-import openai
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message
-from aiogram.enums import ParseMode
-from aiogram import F
-from aiogram.types import Message
+from aiogram.enums.parse_mode import ParseMode
+from openai import OpenAI
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OPENAI_KEY = os.getenv("OPENAI_KEY")
-CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+OPENAI_KEY = os.environ.get("OPENAI_KEY")
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID"))  # -10019...
 
-bot = Bot(TOKEN, parse_mode=ParseMode.HTML)
+client = OpenAI(api_key=OPENAI_KEY)
+bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 
-openai.api_key = OPENAI_KEY
-
+def trim(text, max_words=6):
+    words = text.split()
+    if len(words) > max_words:
+        return " ".join(words[:max_words]) + " ..."
+    return text
 
 async def ask_gpt(text):
-    system_prompt = """
-Ты — остроумный персонаж с лёгким нигилизмом и уличным юмором.
-Всегда отвечаешь в 3 строки:
+    prompt = f"""
+Ты — веселый, дерзкий, токсично-ласковый аналитик настроения.
 
-Ботэнский 🤖:
-<реакция/мысль — коротко>
-<панч/юмор>
-Диагноз: <короткая оценка состояния говорящего — стёб, подкол>
+Говоришь КОРОТКО: максимум 2 строки.
+Если человек ныл — говори прямо: "братан, ты расклеился, соберись".
+Если слишком радуется — подъеби чуть, приземли.
+Всегда добавляй слово "ботэнский 😈" в конце.
 
-Тон: дерзкий, уверенный, смешной. 
-Не извиняешься, не объясняешься, не пишешь длинные лекции.
-Если человек "раскис" — скажи это. Если орёт — скажи, что истерит.
-Если голосовое-кружок — воспринимай как интимную исповедь.
+Дай вывод в формате:
+Комментарий + перенос строки
+Оценка: (очень плохо / плохо / норм / хорошо / слишком радостный)
+
+Текст:
+{text}
 """
-    resp = openai.ChatCompletion.create(
+
+    resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt.strip()},
-            {"role": "user", "content": text}
-        ],
-        temperature=1.35
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return resp.choices[0].message.content.strip()
+
+# --- ЛИЧКА ---
+@dp.message(lambda m: m.chat.type == "private")
+async def dm(message: types.Message):
+    text = message.text or ""
+    reply = await ask_gpt(trim(text))
+    await message.answer(reply)
+
+# --- КРУЖКИ ---
+@dp.message(lambda m: m.voice or m.video_note)
+async def voice(message: types.Message):
+    reply = await ask_gpt("кружок пойман, анализирую вайб...")
+    await message.answer(reply)
+
+# --- ПОСТЫ В КАНАЛЕ (включая скрытые, без уведомлений, автоматические) ---
+@dp.channel_post()
+async def channel_post(message: types.Message):
+    text = message.text or message.caption or ""
+    if not text.strip():
+        return
+    reply = await ask_gpt(trim(text))
+
+    await bot.send_message(
+        chat_id=CHANNEL_ID,
+        text=reply,
+        reply_to_message_id=message.message_id
     )
 
-    reply = resp.choices[0].message["content"].strip()
-
-    if not reply.startswith("Ботэнский"):
-        reply = "Ботэнский 🤖:\n" + reply
-
-    lines = reply.split("\n")
-    reply = "\n".join(lines[:3])  # жёстко обрезаем до 3 строк
-
-    return reply
-
-
-@dp.message(F.text)
-async def handle_text(message: types.Message):
-    reply = await ask_gpt(message.text)
-    await message.answer(reply)
-    try:
-        await bot.send_message(CHANNEL_ID, reply)
-    except Exception as e:
-        print('�� ���� ��������� � �����:', e)
-
-
-@dp.message(F.video_note)
-async def handle_circle(message: types.Message):
-    file = await bot.get_file(message.video_note.file_id)
-    data = await bot.download_file(file.file_path)
-
-    path = "voice.ogg"
-    with open(path, "wb") as f:
-        f.write(data.read())
-
-    transcript = openai.Audio.transcribe("whisper-1", open(path, "rb"))
-    text = transcript["text"].strip()
-
-    reply = await ask_gpt(text)
-    await message.answer(f"🎤 Распознал кружок как: <i>{text}</i>\n\n{reply}")
-
-
 async def main():
+    print("Ботэнский взлетел 😈")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     import asyncio
