@@ -2,18 +2,16 @@ name: Run Telegram Bot
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/15 * * * *"   # autorestart every 15 min
 
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Kill previous bot processes
+    - name: Stop previous bot
       run: pkill -f bot.py || true
 
-    - name: Checkout
+    - name: Checkout repo
       uses: actions/checkout@v4
 
     - name: Setup Python
@@ -21,10 +19,19 @@ jobs:
       with:
         python-version: "3.11"
 
-    - name: Install Dependencies
+    - name: Install requirements
       run: pip install -r requirements.txt
 
-    - name: Run Bot Forever
+    - name: Remove GitHub Proxy
+      run: |
+        unset HTTP_PROXY
+        unset HTTPS_PROXY
+        unset http_proxy
+        unset https_proxy
+        unset ALL_PROXY
+        unset all_proxy
+
+    - name: Run bot
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
