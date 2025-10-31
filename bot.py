@@ -1,70 +1,70 @@
+import asyncio
 import os
-from aiogram import Bot, Dispatcher, types
-from aiogram.enums.parse_mode import ParseMode
 import openai
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.enums import ContentType
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-OPENAI_KEY = os.environ.get("OPENAI_KEY")
-CHANNEL_ID = int(os.environ.get("CHANNEL_ID"))
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+openai.api_key = os.getenv("OPENAI_KEY")
 
-openai.api_key = OPENAI_KEY
-
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(TOKEN)
 dp = Dispatcher()
 
-def trim(text, max_words=6):
-    words = text.split()
-    if len(words) > max_words:
-        return " ".join(words[:max_words]) + " ..."
-    return text
+def rate_mood(text: str) -> str:
+    t = text.lower()
+    if any(w in t for w in ["плохо","хуево","устал","груст","один","пусто"]):
+        return "Настроение: болото 🐸 — ну бля, соберись."
+    if any(w in t for w in ["норм","ладно","такое","ок"]):
+        return "Настроение: так себе 😐 — жить можно, но слабовато."
+    return "Настроение: огонь ⚡ — пылаешь, тигр."
 
-async def ask_gpt(text):
-    prompt = f"""
-Ты — дерзкий, радостный и немного злой друг.
-Отвечаешь в 2 строки, остро, уверенно, без воды.
-Всегда заканчиваешь фразой: "ботэнский 😈"
-
-После ответа пиши строку:
-Оценка: расклеился / норм / слишком радуешься / злой тигр
-
-Текст:
-{text}
-"""
+async def ask_gpt(full_text):
     resp = openai.ChatCompletion.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[
+            {"role": "system",
+             "content": "Отвечай дерзко, коротко, с подъебом и теплом. В конце всегда добавляй: ботэнский 😈"},
+            {"role": "user", "content": full_text}
+        ],
+        max_tokens=100,
+        temperature=1.2
     )
-    return resp.choices[0].message["content"].strip()
+    reply = resp.choices[0].message["content"].strip()
+    words = reply.split()
+    reply = " ".join(words[:9])
+    return reply
 
-# Личка
-@dp.message(lambda m: m.chat.type == "private")
-async def private_message(message: types.Message):
-    reply = await ask_gpt(trim(message.text or ""))
-    await message.answer(reply)
+async def handle_circle(message: types.Message):
+    full_text = message.caption or "без текста"
+    reply = await ask_gpt(full_text)
+    mood = rate_mood(full_text)
+    await bot.send_message(message.chat.id, f"{reply}\n\n{mood}", reply_to_message_id=message.message_id)
 
-# Кружок / войс
-@dp.message(lambda m: m.voice or m.video_note)
-async def voice_handler(message: types.Message):
-    reply = await ask_gpt("кружок: распознать настроение")
-    await message.answer(reply)
+@dp.message(F.chat.type == "private")
+async def private_chat(message: types.Message):
+    if message.content_type == ContentType.VIDEO_NOTE:
+        return await handle_circle(message)
+    full_text = message.text
+    reply = await ask_gpt(full_text)
+    mood = rate_mood(full_text)
+    await message.answer(f"{reply}\n\n{mood}")
 
-# Канал — включая скрытые/без уведомления
 @dp.channel_post()
-async def channel_post_handler(message: types.Message):
-    text = message.text or message.caption or ""
-    if not text:
+async def channel_handler(message: types.Message):
+    if message.content_type == ContentType.VIDEO_NOTE:
+        return await handle_circle(message)
+
+    full_text = message.text or message.caption
+    if not full_text:
         return
-    reply = await ask_gpt(trim(text))
-    await bot.send_message(
-        chat_id=CHANNEL_ID,
-        text=reply,
-        reply_to_message_id=message.message_id
-    )
+
+    reply = await ask_gpt(full_text)
+    mood = rate_mood(full_text)
+    await bot.send_message(message.chat.id, f"{reply}\n\n{mood}", reply_to_message_id=message.message_id)
 
 async def main():
-    print("ботэнский взлетел 😈")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
