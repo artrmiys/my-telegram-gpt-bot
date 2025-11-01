@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher, types, F
 import requests 
 import csv
 from datetime import datetime
+from aiogram.filters import Command
 
 
 # ─────────────────────────────────────────────────────────────
@@ -245,6 +246,42 @@ async def describe_image(file_id):
     return r.choices[0].message.content.strip()
 
 
+# ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+# Команды в личке
+@dp.message(Command("log"))
+async def cmd_log(message: types.Message):
+    if not os.path.exists("logs.csv"):
+        await message.answer("Лог пока пуст 😐")
+        return
+    await message.answer_document(types.FSInputFile("logs.csv"))
+
+@dp.message(Command("weekly"))
+async def cmd_weekly(message: types.Message):
+    summary = await build_weekly_summary()
+    await message.answer(summary)
+
+
+# ─────────────────────────────────────────────────────────────
+# Команды в канале
+@dp.channel_post(Command("log"))
+async def cmd_channel_log(message: types.Message):
+    if message.chat.id != CHANNEL_ID:
+        return
+    if not os.path.exists("logs.csv"):
+        await message.reply("Лог пуст 😐", disable_notification=True)
+        return
+    await message.reply_document(types.FSInputFile("logs.csv"), disable_notification=True)
+
+@dp.channel_post(Command("weekly"))
+async def cmd_channel_weekly(message: types.Message):
+    if message.chat.id != CHANNEL_ID:
+        return
+    summary = await build_weekly_summary()
+    await message.reply(summary, disable_notification=True)
+
+
 
 # ─────────────────────────────────────────────────────────────
 # Handlers в личке
@@ -337,24 +374,6 @@ async def on_channel_photo(message: types.Message):
     file_id = message.photo[-1].file_id
     reply = await describe_image(file_id)
     await message.reply(reply, disable_notification=True)
-
-
-@dp.message(F.text.startswith("/weekly"))
-async def on_weekly(message: types.Message):
-    summary = await build_weekly_summary()
-    await message.answer(summary)
-
-# ─────────────────────────────────────────────────────────────
-# Команда: прислать лог
-@dp.message(F.text.startswith("/log"))
-async def on_log(message: types.Message):
-    # файл должен существовать
-    if not os.path.exists("logs.csv"):
-        await message.answer("Лог пока пуст 😐")
-        return
-
-    await message.answer_document(types.FSInputFile("logs.csv"))
-
 
 # ─────────────────────────────────────────────────────────────
 async def main():
