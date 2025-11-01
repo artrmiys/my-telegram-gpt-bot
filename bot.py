@@ -1,7 +1,7 @@
 import os
 import asyncio
-import random
 import openai
+import random
 from aiogram import Bot, Dispatcher, types, F
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -12,65 +12,78 @@ openai.api_key = OPENAI_KEY
 bot = Bot(TOKEN)
 dp = Dispatcher()
 
+SOURCES = [
+    "https://arzamas.academy",
+    "https://polka.academy",
+    "https://postnauka.ru",
+    "https://gorky.media",
+    "https://prozhito.org",
+    "https://www.culture.ru",
+    "https://the-steppe.com",
+    "https://knife.media",
+    "https://syg.ma",
+    "https://archi.ru",
+    "https://moskvichmag.ru",
+    "https://birdinflight.com",
+    "https://plato.stanford.edu",
+    "https://iep.utm.edu",
+    "https://www.rep.routledge.com",
+    "https://arthive.com",
+    "https://artsandculture.google.com",
+    "https://artchive.ru",
+    "https://prozhito.org/page/archive",
+    "https://ru.knowledgr.com",
+    "https://biography.yandex",
+    "https://paperpaper.ru",
+]
 
-async def rating_line(text):
-    """
-    Оценка не просто случайная — она учитывает "тон": усталость / возбуждение / задумчивость.
-    """
+
+async def mood_line(text):
     prompt = f"""
-Проанализируй настроение фразы:
+Проанализируй эмоциональный тон фразы:
 
 "{text}"
 
-Выбери оценку от 1 до 10.
-Затем придумай острую, но тёплую формулировку реакции.
-Без мата. Стиль — дружелюбная наглая харизма.
+Определи состояние говорящего и поставь оценку от 1 до 10.
+Сформулируй короткую, колкую, уверенную фразу без мата.
 
 Формат строго:
-"<число>/10 — <короткая колкая фраза>"
+"<число>/10 — <фраза>"
 """
 
     r = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         messages=[{"role": "user", "content": prompt}]
     )
-
     return r.choices[0].message.content.strip()
 
 
-async def reference_check(text):
-    """
-    Ищем упоминания мест, событий, персон.
-    Источник — не Википедия.
-    """
+async def reference_lookup(text):
     prompt = f"""
 Текст: "{text}"
 
-Есть ли здесь ссылка на:
-— историческую личность
-— город/место
-— культурное явление
-— закон/событие
+Если в тексте нет культурных / исторических / географических / персональных ссылок,
+верни: ПУСТО.
 
-Если нет → верни ПУСТО.
+Если есть — дай:
+ℹ️ очень короткую справку в 1 предложение.
 
-Если да → дай очень короткую справку (1–2 строки)
-и ссылку не из Википедии (на сайт книг, статей, блогов, музеев, архивов).
-
-Формат:
-ℹ️ <краткая суть в одном предложении>
-🔗 <ссылка>
+Не используй Википедию.
+Только смысл. Без воды.
 """
 
     r = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    result = r.choices[0].message.content.strip()
-    if result.lower().startswith("пусто"):
+    summary = r.choices[0].message.content.strip()
+
+    if summary.lower().startswith("пусто"):
         return ""
-    return result
+
+    link = random.choice(SOURCES)
+    return f"{summary}\n🔗 {link}"
 
 
 async def transcribe(file_id):
@@ -82,80 +95,82 @@ async def transcribe(file_id):
         r = openai.Audio.transcribe("whisper-1", f)
 
     full = r.get("text", "").strip()
-    short = " ".join(full.split()[:6]) + "…" if len(full.split()) > 6 else full
+    words = full.split()
+    short = " ".join(words[:6]) + "…" if len(words) > 6 else full
     return full, short
 
 
-async def reply_builder(full_text, short):
-    rating = await rating_line(full_text)
+async def make_reply(full_text):
+    mood = await mood_line(full_text)
 
     system_style = """
 Ты — Ботэнский 🤖.
 Стиль:
-— уверенный
-— тёплая наглость
-— самоирония и лёгкая насмешка, но по-доброму
-— говоришь коротко и метко
+— уверенная расслабленная наглость
+— тёплая колкость
+— харизма, но без агрессии
 — без мата
 """
 
-    user_msg = f"""
+    user_prompt = f"""
 Сообщение: "{full_text}"
 
-Ответ пиши строго так:
+Ответ строго:
 
 Ботэнский 🤖:
-<2 строки живой реакции, с харизмой, можно с эмодзи>
-Оценка: {rating}
+<2 строки реакции, можно эмодзи>
+Оценка: {mood}
 """
 
     r = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         messages=[
             {"role": "system", "content": system_style},
-            {"role": "user", "content": user_msg}
+            {"role": "user", "content": user_prompt}
         ]
     )
 
-    answer = r.choices[0].message.content.strip()
+    reply = r.choices[0].message.content.strip()
+    info = await reference_lookup(full_text)
 
-    ref = await reference_check(full_text)
-    if ref:
-        answer += f"\n\n{ref}"
+    if info:
+        reply += f"\n\n{info}"
 
-    return f"🎤 распознал как: {short}\n\n{answer}"
+    return reply
+
+
+async def reply_text(full_text):
+    return await make_reply(full_text)
+
+
+async def reply_voice(full_text, short):
+    return f"🎤 сказал: {short}\n\n{await make_reply(full_text)}"
 
 
 @dp.message(F.text)
-async def text_reply(message: types.Message):
-    reply = await reply_builder(message.text, message.text)
-    await message.answer(reply)
+async def on_text(message: types.Message):
+    await message.answer(await reply_text(message.text))
 
 
 @dp.message(F.voice)
 @dp.message(F.video_note)
-async def voice_reply(message: types.Message):
+async def on_voice(message: types.Message):
     file_id = message.voice.file_id if message.voice else message.video_note.file_id
     full, short = await transcribe(file_id)
-    reply = await reply_builder(full, short)
-    await message.answer(reply)
+    await message.answer(await reply_voice(full, short))
 
 
 @dp.channel_post()
-async def channel_reply(message: types.Message):
+async def on_channel(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
 
     if message.text:
-        reply = await reply_builder(message.text, message.text)
-        await message.reply(reply, disable_notification=True)
-        return
-
-    if message.voice or message.video_note:
+        await message.reply(await reply_text(message.text), disable_notification=True)
+    elif message.voice or message.video_note:
         file_id = message.voice.file_id if message.voice else message.video_note.file_id
         full, short = await transcribe(file_id)
-        reply = await reply_builder(full, short)
-        await message.reply(reply, disable_notification=True)
+        await message.reply(await reply_voice(full, short), disable_notification=True)
 
 
 async def main():
@@ -164,3 +179,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
