@@ -1,10 +1,11 @@
 import os
 import asyncio
 import openai
+from base64 import b64encode
 from aiogram import Bot, Dispatcher, types, F
 
 # ─────────────────────────────────────────────────────────────
-
+# ENV
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_KEY = os.getenv("OPENAI_KEY")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
@@ -14,8 +15,7 @@ bot = Bot(TOKEN)
 dp = Dispatcher()
 
 # ─────────────────────────────────────────────────────────────
-# Загружаем список источников (не Википедия)
-
+# Источники (если не надо — оставь пустой файл)
 def load_sources():
     try:
         with open("sources.txt", "r", encoding="utf-8") as f:
@@ -26,8 +26,7 @@ def load_sources():
 REFERENCE_SOURCES = load_sources()
 
 # ─────────────────────────────────────────────────────────────
-# Распознавание аудио и кружков
-
+# Распознавание аудио / кружков
 async def transcribe(file_id):
     file = await bot.get_file(file_id)
     await bot.download_file(file.file_path, "voice.ogg")
@@ -41,24 +40,31 @@ async def transcribe(file_id):
     return full, short
 
 # ─────────────────────────────────────────────────────────────
-# Общий обработчик текста
-
+# Генерация текста
 async def build_reply(text, show_short=None):
     prompt = f"""
 Ты — Ботэнский 🤖.
-Стиль: уверенный, дерзкая наглость, дружелюбная ирония, без мата.
+Стиль:
+— уверенный
+— чуть нагловатый, но добрый
+— ироничный, но без токсичности
+— без мата
 
-Источники для справок, если нужно:
+Если можно — сделай вывод про настроение.
+
+Источники (если найдёшь культурное/историческое упоминание — выбери подходящую ссылку):
 {chr(10).join(REFERENCE_SOURCES)}
 
-Формат ответа:
-
+Формат строго:
 Ботэнский 🤖:
-<реакция в 2 строки>
+<2 строки реакции>
 Оценка: <число>/10 — <характеристика>
-<если есть ссылка:>
+<если есть источник:>
 ℹ️ <краткая инфа>
 🔗 <ссылка>
+
+Текст:
+"{text}"
 """
 
     r = openai.ChatCompletion.create(
@@ -66,81 +72,77 @@ async def build_reply(text, show_short=None):
         messages=[{"role": "user", "content": prompt}]
     )
 
-    ans = r.choices[0].message.content.strip()
+    answer = r.choices[0].message.content.strip()
 
     if show_short:
-        return f"🎤 {show_short}\n\n{ans}"
-    return ans
+        return f"🎤 {show_short}\n\n{answer}"
+    return answer
 
 # ─────────────────────────────────────────────────────────────
-# 💥 Новое: распознавание изображений (GPT-5-VISION)
-
+# Описание фото через GPT-5-VISION
 async def describe_image(file_id):
     file = await bot.get_file(file_id)
     await bot.download_file(file.file_path, "image.jpg")
 
     with open("image.jpg", "rb") as f:
-        img_bytes = f.read()
+        img_b64 = b64encode(f.read()).decode("utf-8")
 
-    response = openai.ChatCompletion.create(
+    prompt = """
+Ты — Ботэнский 🤖.
+Опиши фото через атмосферу и настроение присутствующих.
+Не перечисляй объекты — передай ощущение.
+"""
+
+    r = openai.ChatCompletion.create(
         model="gpt-5-vision",
         messages=[
-            {"role": "system", "content": "Ты — Ботэнский 🤖. Отвечай харизматично, мягко нагловато, но доброжелательно."},
+            {"role": "system", "content": prompt},
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_image", "image": img_bytes},
-                    {"type": "text", "text": "Опиши что на фото. Почувствуй настроение. Ответ: 2 строки + оценка (<число>/10 — характеристика)."}
+                    {"type": "input_image", "image_url": f"data:image/jpeg;base64,{img_b64}"},
+                    {"type": "input_text", "text": "Дай 2 строки описания + Оценка: <число>/10 — <характеристика>."}
                 ]
             }
         ]
     )
 
-    return response.choices[0].message.content.strip()
+    return r.choices[0].message.content.strip()
 
 # ─────────────────────────────────────────────────────────────
-# Handlers
-
-# ---- Сообщения в личке ----
+# Handlers — личные сообщения
 @dp.message(F.text)
 async def on_text(message: types.Message):
-    reply = await build_reply(message.text)
-    await message.answer(reply)
+    await message.answer(await build_reply(message.text))
 
 @dp.message(F.voice)
 @dp.message(F.video_note)
 async def on_voice(message: types.Message):
     file_id = message.voice.file_id if message.voice else message.video_note.file_id
     full, short = await transcribe(file_id)
-    reply = await build_reply(full, show_short=short)
-    await message.answer(reply)
+    await message.answer(await build_reply(full, show_short=short))
 
 @dp.message(F.photo)
 async def on_photo(message: types.Message):
     file_id = message.photo[-1].file_id
-    reply = await describe_image(file_id)
-    await message.answer(reply)
+    await message.answer(await describe_image(file_id))
 
-
-# ---- Сообщения в канале ----
-@dp.channel_post()
-async def on_channel(message: types.Message):
+# ─────────────────────────────────────────────────────────────
+# Handlers — канал
+@dp.channel_post(F.text)
+async def on_channel_text(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
-    if message.text:
-        reply = await build_reply(message.text)
-        await message.reply(reply, disable_notification=True)
+    await message.reply(await build_reply(message.text), disable_notification=True)
 
 @dp.channel_post(F.photo)
 async def on_channel_photo(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
     file_id = message.photo[-1].file_id
-    reply = await describe_image(file_id)
-    await message.reply(reply, disable_notification=True)
+    await message.reply(await describe_image(file_id), disable_notification=True)
 
 # ─────────────────────────────────────────────────────────────
-
 async def main():
     await dp.start_polling(bot)
 
