@@ -344,6 +344,17 @@ async def on_weekly(message: types.Message):
     summary = await build_weekly_summary()
     await message.answer(summary)
 
+# ─────────────────────────────────────────────────────────────
+# Команда: прислать лог
+@dp.message(F.text.startswith("/log"))
+async def on_log(message: types.Message):
+    # файл должен существовать
+    if not os.path.exists("logs.csv"):
+        await message.answer("Лог пока пуст 😐")
+        return
+
+    await message.answer_document(types.FSInputFile("logs.csv"))
+
 
 # ─────────────────────────────────────────────────────────────
 async def main():
