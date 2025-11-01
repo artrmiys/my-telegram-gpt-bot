@@ -97,7 +97,7 @@ async def build_reply(text, show_short=None):
 
     prompt = BASE_PROMPT.replace("{SOURCES}", sources_list)
     prompt = prompt.replace("{ARTICLE}", article if article else "")
-    
+
     user_prompt = f"""
 Сообщение:
 \"\"\"{text}\"\"\"
@@ -108,7 +108,7 @@ async def build_reply(text, show_short=None):
     r = openai.ChatCompletion.create(
         model="gpt-5-mini",
         messages=[
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": prompt},
             {"role": "user", "content": user_prompt}
         ],
     )
