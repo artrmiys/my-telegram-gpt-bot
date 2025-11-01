@@ -12,20 +12,76 @@ openai.api_key = OPENAI_KEY
 bot = Bot(TOKEN)
 dp = Dispatcher()
 
-def random_rating():
-    ratings = [
-        "1/10 — как будто ты выдохся морально.",
-        "2/10 — живой, но без искры.",
-        "3/10 — унылая солянка души.",
-        "4/10 — нейтрально, но без блеска.",
-        "5/10 — стабильно-неплохо.",
-        "6/10 — есть жизнь в глазах.",
-        "7/10 — приятный светящийся шарик.",
-        "8/10 — солнечный зайчик человеческого вида.",
-        "9/10 — прям сияешь.",
-        "10/10 — ты просто бог ракурсов и харизмы."
-    ]
-    return random.choice(ratings)
+
+async def random_rating_gpt():
+    base_scale = {
+        1: "как будто ты выдохся морально",
+        2: "живой, но без искры",
+        3: "унылая солянка души",
+        4: "нейтрально, без блеска",
+        5: "стабильно, но без огонька",
+        6: "есть жизнь в глазах",
+        7: "приятное свечение",
+        8: "солнечный зайчик человеческого вида",
+        9: "прям сияешь",
+        10: "бог ракурсов и харизмы"
+    }
+
+    score = random.randint(1, 10)
+    meaning = base_scale[score]
+
+    prompt = f"""
+Сгенерируй новую формулировку оценки в стиле дружелюбной колкости.
+Коротко, дерзко, но тепло. Без мата.
+Формат: "{score}/10 — <фраза>"
+Смысл основы: {meaning}
+"""
+
+    resp = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return resp.choices[0].message.content.strip()
+
+
+async def detect_reference(full_text):
+    """
+    Если в тексте есть историческое место, персонаж или закон —
+    возвращаем справку.
+    Иначе — пустую строку.
+    """
+    prompt = f"""
+Определи, есть ли в тексте значимая ссылка на:
+— историческое место / здание
+— страну / город
+— закон, документ, реформу
+— исторического или культурного персонажа
+
+Текст: "{full_text}"
+
+Если нет — верни ПУСТО.
+Если есть — дай очень короткую справку (1–2 строки) + ссылку.
+Формат:
+
+ℹ️ <краткая суть>
+🔗 <вики-ссылка>
+
+Без лишних слов.
+"""
+
+    resp = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    info = resp.choices[0].message.content.strip()
+
+    if info.lower().startswith("нет") or info == "":
+        return ""
+
+    return info
+
 
 async def transcribe(file_id):
     file = await bot.get_file(file_id)
@@ -36,66 +92,87 @@ async def transcribe(file_id):
     with open(temp, "rb") as f:
         r = openai.Audio.transcribe("whisper-1", f)
 
-    text = r.get("text", "").strip()
-    return text if text else "..."
+    full = r.get("text", "").strip()
+    words = full.split()
+    short = " ".join(words[:6]) + "…" if len(words) > 6 else full
+    return full, short
 
-async def ask_gpt(full_text):
-    short = " ".join(full_text.split()[:4]) + "…" if len(full_text) > 40 else full_text
-    mood = random_rating()
 
-    prompt = f"""
+async def ask_gpt(full_text, short_text):
+    mood = await random_rating_gpt()
+
+    system_prompt = """
 Ты — Ботэнский 🤖.
-Стиль: жизнерадостный, немного наглый, добродушно-грубоватый, **без мата**, иногда чуть ниже пояса, но мило.
+Стиль:
+— умный
+— слегка колкий, но добрый
+— уверенный, не заискивающий
+— говоришь легко, красиво, иногда с улыбкой снисходительности
+— без мата и токсичности
+"""
 
-Отвечай всегда ровно так:
+    user_prompt = f"""
+Сообщение: "{full_text}"
+
+Сформулируй ответ строго в формате:
 
 Ботэнский 🤖:
-(2 строки остроумной реакции)
-Оценка настроения: {mood}
-
-Оригинал: "{short}"
+(2 строки реакции с живой колкостью и теплотой, используй эмодзи)
+Оценка: {mood}
 """
 
     resp = openai.ChatCompletion.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
     )
-    return resp.choices[0].message.content.strip()
+
+    answer = resp.choices[0].message.content.strip()
+
+    reference = await detect_reference(full_text)
+    if reference:
+        answer += f"\n\n{reference}"
+
+    return f"🎤 Распознал кружок как: {short_text}\n\n{answer}"
+
 
 @dp.message(F.text)
 async def reply_private(message: types.Message):
-    reply = await ask_gpt(message.text)
+    reply = await ask_gpt(message.text, message.text)
     await message.answer(reply)
+
 
 @dp.message(F.voice)
 @dp.message(F.video_note)
 async def reply_private_audio(message: types.Message):
     file_id = message.voice.file_id if message.voice else message.video_note.file_id
-    text = await transcribe(file_id)
-    reply = await ask_gpt(text)
+    full, short = await transcribe(file_id)
+    reply = await ask_gpt(full, short)
     await message.answer(reply)
+
 
 @dp.channel_post()
 async def reply_channel(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
 
-    text = None
-
     if message.text:
-        text = message.text
-    elif message.voice or message.video_note:
-        file_id = message.voice.file_id if message.voice else message.video_note.file_id
-        text = await transcribe(file_id)
-
-    if not text:
+        reply = await ask_gpt(message.text, message.text)
+        await message.reply(reply, disable_notification=True)
         return
 
-    reply = await ask_gpt(text)
-    await message.reply(reply, disable_notification=True)
+    if message.voice or message.video_note:
+        file_id = message.voice.file_id if message.voice else message.video_note.file_id
+        full, short = await transcribe(file_id)
+        reply = await ask_gpt(full, short)
+        await message.reply(reply, disable_notification=True)
+
 
 async def main():
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
