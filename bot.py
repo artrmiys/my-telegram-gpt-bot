@@ -263,38 +263,16 @@ async def cmd_log(message: types.Message):
     if not os.path.exists("logs.csv"):
         await message.answer("Лог пока пуст 😐")
         return
-
-    lines = []
+    # читаем лог построчно
     with open("logs.csv", "r", encoding="utf-8") as f:
-        for row in f:
-            parts = row.strip().split(",", 3)
-            if len(parts) == 4:
-                ts, uid, kind, text = parts
-                lines.append(f"🕒 {ts}\n👤 {uid} | 🎙 {kind}\n{text}\n")
-
-    logs_text = "\n".join(lines[-25:])  # последние 25 записей
-    await message.answer(logs_text or "Лог пуст 😐")
+        lines = f.readlines()[-30:]  # последние 30 сообщений
+    await message.answer("".join(lines))
 
 
-@dp.channel_post(Command("log"))
-async def cmd_channel_log(message: types.Message):
-    if message.chat.id != CHANNEL_ID:
-        return
-
-    if not os.path.exists("logs.csv"):
-        await message.reply("Лог пуст 😐", disable_notification=True)
-        return
-
-    lines = []
-    with open("logs.csv", "r", encoding="utf-8") as f:
-        for row in f:
-            parts = row.strip().split(",", 3)
-            if len(parts) == 4:
-                ts, uid, kind, text = parts
-                lines.append(f"🕒 {ts}\n👤 {uid} | 🎙 {kind}\n{text}\n")
-
-    logs_text = "\n".join(lines[-25:])
-    await message.reply(logs_text or "Лог пуст 😐", disable_notification=True)
+@dp.message(Command("weekly"))
+async def cmd_weekly(message: types.Message):
+    summary = await build_weekly_summary()
+    await message.answer(summary)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -306,7 +284,10 @@ async def cmd_channel_log(message: types.Message):
     if not os.path.exists("logs.csv"):
         await message.reply("Лог пуст 😐", disable_notification=True)
         return
-    await message.reply_document(types.FSInputFile("logs.csv"), disable_notification=True)
+    with open("logs.csv", "r", encoding="utf-8") as f:
+        lines = f.readlines()[-30:]
+    await message.reply("".join(lines), disable_notification=True)
+
 
 @dp.channel_post(Command("weekly"))
 async def cmd_channel_weekly(message: types.Message):
