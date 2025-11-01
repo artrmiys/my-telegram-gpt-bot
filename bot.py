@@ -184,38 +184,42 @@ async def build_voice_reply(text):
 async def build_weekly_summary():
     import pandas as pd
 
-    if not os.path.exists("logs.csv"):
+    try:
+        df = pd.read_csv(
+            "logs.csv",
+            header=None,
+            names=["timestamp", "user_id", "msg_type", "text"]
+        )
+    except:
         return "Нет данных за неделю."
 
-    try:
-        df = pd.read_csv("logs.csv", header=None)
-    except:
-        return "Ошибка чтения лога."
-
-    # Добавляем названия столбцов
-    df.columns = ["timestamp", "user_id", "msg_type", "text"]
-
-    # Преобразуем timestamp
+    # преобразуем timestamp
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
 
-    # Фильтруем за неделю
-    last_week = df[df["timestamp"] >= (pd.Timestamp.now() - pd.Timedelta(days=7))]
+    # фильтр по последним 7 дням
+    week = df[df["timestamp"] >= (pd.Timestamp.now() - pd.Timedelta(days=7))]
 
-    if last_week.empty:
+    if week.empty:
         return "За неделю не было сообщений."
 
-    text_block = "\n".join(last_week["text"].astype(str).tolist())
+    # исключаем команды (/weekly /log)
+    week = week[~week["text"].str.startswith("/")]
+
+    # берём только текст
+    text_block = "\n".join(week["text"].astype(str).tolist())
+
+    if not text_block.strip():
+        return "Недостаточно данных для анализа недели."
 
     r = openai.ChatCompletion.create(
         model="gpt-5-mini",
         messages=[
             {"role": "system", "content": WEEKLY_PROMPT},
-            {"role": "user", "content": f"Вот сообщения за неделю:\n\n{text_block}"}
+            {"role": "user", "content": f"Вот сообщения человека за неделю:\n\n{text_block}"}
         ]
     )
 
     return r.choices[0].message.content.strip()
-
 
 
 # ─────────────────────────────────────────────────────────────
@@ -264,8 +268,13 @@ async def cmd_log(message: types.Message):
         await message.answer("Лог пока пуст 😐")
         return
     # читаем лог построчно
+    lines = []
     with open("logs.csv", "r", encoding="utf-8") as f:
-        lines = f.readlines()[-30:]  # последние 30 сообщений
+        for row in f:
+            parts = row.strip().split(",", 3)
+            if len(parts) == 4:
+                ts, kind, text = parts
+                lines.append(f"🕒 {ts} | 🎙 {kind}\n{text}\n")
     await message.answer("".join(lines))
 
 
@@ -284,8 +293,13 @@ async def cmd_channel_log(message: types.Message):
     if not os.path.exists("logs.csv"):
         await message.reply("Лог пуст 😐", disable_notification=True)
         return
+    lines = []
     with open("logs.csv", "r", encoding="utf-8") as f:
-        lines = f.readlines()[-30:]
+        for row in f:
+            parts = row.strip().split(",", 3)
+            if len(parts) == 4:
+                ts, kind, text = parts
+                lines.append(f"🕒 {ts} | 🎙 {kind}\n{text}\n")
     await message.reply("".join(lines), disable_notification=True)
 
 
