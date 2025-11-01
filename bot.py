@@ -13,160 +13,148 @@ bot = Bot(TOKEN)
 dp = Dispatcher()
 
 
-async def random_rating_gpt():
-    base_scale = {
-        1: "как будто ты выдохся морально",
-        2: "живой, но без искры",
-        3: "унылая солянка души",
-        4: "нейтрально, без блеска",
-        5: "стабильно, но без огонька",
-        6: "есть жизнь в глазах",
-        7: "приятное свечение",
-        8: "солнечный зайчик человеческого вида",
-        9: "прям сияешь",
-        10: "бог ракурсов и харизмы"
-    }
-
-    score = random.randint(1, 10)
-    meaning = base_scale[score]
-
+async def rating_line(text):
+    """
+    Оценка не просто случайная — она учитывает "тон": усталость / возбуждение / задумчивость.
+    """
     prompt = f"""
-Сгенерируй новую формулировку оценки в стиле дружелюбной колкости.
-Коротко, дерзко, но тепло. Без мата.
-Формат: "{score}/10 — <фраза>"
-Смысл основы: {meaning}
+Проанализируй настроение фразы:
+
+"{text}"
+
+Выбери оценку от 1 до 10.
+Затем придумай острую, но тёплую формулировку реакции.
+Без мата. Стиль — дружелюбная наглая харизма.
+
+Формат строго:
+"<число>/10 — <короткая колкая фраза>"
 """
 
-    resp = openai.ChatCompletion.create(
+    r = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return resp.choices[0].message.content.strip()
+    return r.choices[0].message.content.strip()
 
 
-async def detect_reference(full_text):
+async def reference_check(text):
     """
-    Если в тексте есть историческое место, персонаж или закон —
-    возвращаем справку.
-    Иначе — пустую строку да..
+    Ищем упоминания мест, событий, персон.
+    Источник — не Википедия.
     """
     prompt = f"""
-Определи, есть ли в тексте значимая ссылка на:
-— историческое место / здание
-— страну / город
-— закон, документ, реформу
-— исторического или культурного персонажа
+Текст: "{text}"
 
-Текст: "{full_text}"
+Есть ли здесь ссылка на:
+— историческую личность
+— город/место
+— культурное явление
+— закон/событие
 
-Если нет — верни ПУСТО.
-Если есть — дай очень короткую справку (1–2 строки) + ссылку.
+Если нет → верни ПУСТО.
+
+Если да → дай очень короткую справку (1–2 строки)
+и ссылку не из Википедии (на сайт книг, статей, блогов, музеев, архивов).
+
 Формат:
-
-ℹ️ <краткая суть>
-🔗 <вики-ссылка>
-
-Без лишних слов.
+ℹ️ <краткая суть в одном предложении>
+🔗 <ссылка>
 """
 
-    resp = openai.ChatCompletion.create(
+    r = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    info = resp.choices[0].message.content.strip()
-
-    if info.lower().startswith("нет") or info == "":
+    result = r.choices[0].message.content.strip()
+    if result.lower().startswith("пусто"):
         return ""
-
-    return info
+    return result
 
 
 async def transcribe(file_id):
     file = await bot.get_file(file_id)
-    path = file.file_path
     temp = "voice.ogg"
-    await bot.download_file(path, temp)
+    await bot.download_file(file.file_path, temp)
 
     with open(temp, "rb") as f:
         r = openai.Audio.transcribe("whisper-1", f)
 
     full = r.get("text", "").strip()
-    words = full.split()
-    short = " ".join(words[:6]) + "…" if len(words) > 6 else full
+    short = " ".join(full.split()[:6]) + "…" if len(full.split()) > 6 else full
     return full, short
 
 
-async def ask_gpt(full_text, short_text):
-    mood = await random_rating_gpt()
+async def reply_builder(full_text, short):
+    rating = await rating_line(full_text)
 
-    system_prompt = """
+    system_style = """
 Ты — Ботэнский 🤖.
 Стиль:
-— умный
-— слегка колкий, но добрый
-— уверенный, не заискивающий
-— говоришь легко, красиво, иногда с улыбкой снисходительности
-— без мата и токсичности
+— уверенный
+— тёплая наглость
+— самоирония и лёгкая насмешка, но по-доброму
+— говоришь коротко и метко
+— без мата
 """
 
-    user_prompt = f"""
+    user_msg = f"""
 Сообщение: "{full_text}"
 
-Сформулируй ответ строго в формате:
+Ответ пиши строго так:
 
 Ботэнский 🤖:
-(2 строки реакции с живой колкостью и теплотой, используй эмодзи)
-Оценка: {mood}
+<2 строки живой реакции, с харизмой, можно с эмодзи>
+Оценка: {rating}
 """
 
-    resp = openai.ChatCompletion.create(
+    r = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
+            {"role": "system", "content": system_style},
+            {"role": "user", "content": user_msg}
         ]
     )
 
-    answer = resp.choices[0].message.content.strip()
+    answer = r.choices[0].message.content.strip()
 
-    reference = await detect_reference(full_text)
-    if reference:
-        answer += f"\n\n{reference}"
+    ref = await reference_check(full_text)
+    if ref:
+        answer += f"\n\n{ref}"
 
-    return f"🎤 Распознал кружок как: {short_text}\n\n{answer}"
+    return f"🎤 распознал как: {short}\n\n{answer}"
 
 
 @dp.message(F.text)
-async def reply_private(message: types.Message):
-    reply = await ask_gpt(message.text, message.text)
+async def text_reply(message: types.Message):
+    reply = await reply_builder(message.text, message.text)
     await message.answer(reply)
 
 
 @dp.message(F.voice)
 @dp.message(F.video_note)
-async def reply_private_audio(message: types.Message):
+async def voice_reply(message: types.Message):
     file_id = message.voice.file_id if message.voice else message.video_note.file_id
     full, short = await transcribe(file_id)
-    reply = await ask_gpt(full, short)
+    reply = await reply_builder(full, short)
     await message.answer(reply)
 
 
 @dp.channel_post()
-async def reply_channel(message: types.Message):
+async def channel_reply(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
 
     if message.text:
-        reply = await ask_gpt(message.text, message.text)
+        reply = await reply_builder(message.text, message.text)
         await message.reply(reply, disable_notification=True)
         return
 
     if message.voice or message.video_note:
         file_id = message.voice.file_id if message.voice else message.video_note.file_id
         full, short = await transcribe(file_id)
-        reply = await ask_gpt(full, short)
+        reply = await reply_builder(full, short)
         await message.reply(reply, disable_notification=True)
 
 
