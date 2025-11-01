@@ -59,9 +59,6 @@ async def build_reply(text, show_short=None):
 <если есть ссылка:>
 ℹ️ <краткая инфа>
 🔗 <ссылка>
-
-Текст:
-"{text}"
 """
 
     r = openai.ChatCompletion.create(
@@ -104,6 +101,7 @@ async def describe_image(file_id):
 # ─────────────────────────────────────────────────────────────
 # Handlers
 
+# ---- Сообщения в личке ----
 @dp.message(F.text)
 async def on_text(message: types.Message):
     reply = await build_reply(message.text)
@@ -119,15 +117,26 @@ async def on_voice(message: types.Message):
 
 @dp.message(F.photo)
 async def on_photo(message: types.Message):
-    file_id = message.photo[-1].file_id  # самое лучшее качество
+    file_id = message.photo[-1].file_id
     reply = await describe_image(file_id)
     await message.answer(reply)
 
+
+# ---- Сообщения в канале ----
 @dp.channel_post()
 async def on_channel(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
-    reply = await build_reply(message.text if message.text else "")
+    if message.text:
+        reply = await build_reply(message.text)
+        await message.reply(reply, disable_notification=True)
+
+@dp.channel_post(F.photo)
+async def on_channel_photo(message: types.Message):
+    if message.chat.id != CHANNEL_ID:
+        return
+    file_id = message.photo[-1].file_id
+    reply = await describe_image(file_id)
     await message.reply(reply, disable_notification=True)
 
 # ─────────────────────────────────────────────────────────────
