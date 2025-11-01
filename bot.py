@@ -4,6 +4,9 @@ import base64
 import openai
 from aiogram import Bot, Dispatcher, types, F
 import requests 
+import csv
+from datetime import datetime
+
 
 # ─────────────────────────────────────────────────────────────
 # ENV
@@ -16,6 +19,34 @@ SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 openai.api_key = OPENAI_KEY
 bot = Bot(TOKEN)
 dp = Dispatcher()
+
+def should_skip(text: str) -> bool:
+    if not text:
+        return False
+    return "*бот не надо" in text.lower()
+
+def log_message(user_id, msg_type, text):
+    try:
+        with open("logs.csv", "a", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                datetime.now().isoformat(timespec='seconds'),
+                user_id,
+                msg_type,
+                text.replace("\n", " ").strip()
+            ])
+    except Exception as e:
+        print("Log error:", e)
+
+def load_weekly_prompt():
+    try:
+        with open("weekly_prompt.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except:
+        return ""
+
+WEEKLY_PROMPT = load_weekly_prompt()
+
 
 # ─────────────────────────────────────────────────────────────
 # Загружаем рекомендованные источники
@@ -71,6 +102,15 @@ def load_prompt():
 
 BASE_PROMPT = load_prompt()
 
+def load_voice_prompt():
+    try:
+        with open("prompt_voice.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except:
+        return ""
+VOICE_PROMPT = load_voice_prompt()
+
+
 # ─────────────────────────────────────────────────────────────
 # Распознавание аудио / кружков → Whisper
 async def transcribe(file_id):
@@ -118,6 +158,57 @@ async def build_reply(text, show_short=None):
     return f"🎤 {show_short}\n\n{ans}" if show_short else ans
 
 
+async def build_voice_reply(text):
+
+    if "*бот не надо" in text.lower():
+        return None  # вообще ничего не отправляем
+
+    article = search_article(text)
+    sources = REFERENCE_SOURCES or []
+    sources_list = "\n".join(f"• {s}" for s in sources) if sources else "—"
+
+    prompt = VOICE_PROMPT.replace("{SOURCES}", sources_list)
+    prompt = prompt.replace("{ARTICLE}", article if article else "")
+
+    r = openai.ChatCompletion.create(
+        model="gpt-5-mini",
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": text}
+        ],
+    )
+
+    return r.choices[0].message.content.strip()
+
+async def build_weekly_summary():
+    import pandas as pd
+
+    try:
+        df = pd.read_csv("logs.csv")
+    except:
+        return "Нет данных за неделю."
+
+    # берём только последние 7 дней
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    last_week = df[df["timestamp"] >= (pd.Timestamp.now() - pd.Timedelta(days=7))]
+
+    if last_week.empty:
+        return "За неделю не было сообщений."
+
+    text_block = "\n".join(last_week["text"].astype(str).tolist())
+
+    r = openai.ChatCompletion.create(
+        model="gpt-5-mini",
+        messages=[
+            {"role": "system", "content": WEEKLY_PROMPT},
+            {"role": "user", "content": f"Вот сообщения:\n\n{text_block}"}
+        ]
+    )
+
+    return r.choices[0].message.content.strip()
+
+
+
 # ─────────────────────────────────────────────────────────────
 # 📷 Распознавание фото — через `gpt-4o` (рабочая vision модель)
 async def describe_image(file_id):
@@ -159,19 +250,39 @@ async def describe_image(file_id):
 # Handlers в личке
 @dp.message(F.text)
 async def on_text(message: types.Message):
+    if should_skip(message.text):
+        return
+    
+    log_message(message.from_user.id, "text", message.text)
     reply = await build_reply(message.text)
     await message.answer(reply)
+
 
 @dp.message(F.voice)
 @dp.message(F.video_note)
 async def on_voice(message: types.Message):
     file_id = message.voice.file_id if message.voice else message.video_note.file_id
     full, short = await transcribe(file_id)
-    reply = await build_reply(full, show_short=short)
-    await message.answer(reply)
+
+    # стоп-фраза применяется к расшифровке речи
+    if should_skip(full):
+        return
+    
+    log_message(message.from_user.id, "voice", full)
+    reply = await build_voice_reply(full)  # ← ВАЖНО: используем voice-промпт
+
+    if reply:  # если None → ничего не отправляем
+        await message.answer(reply)
+
 
 @dp.message(F.photo)
 async def on_photo(message: types.Message):
+    # если есть подпись и там стоп — не отвечаем
+    if message.caption and should_skip(message.caption):
+        return
+
+    log_message(message.from_user.id, "photo", message.caption or "")
+
     file_id = message.photo[-1].file_id
     reply = await describe_image(file_id)
     await message.answer(reply)
@@ -179,21 +290,59 @@ async def on_photo(message: types.Message):
 
 # ─────────────────────────────────────────────────────────────
 # Handlers в канале
-@dp.channel_post()
+
+@dp.channel_post(F.text)
 async def on_channel_text(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
-    if message.text:
-        reply = await build_reply(message.text)
+    
+    if should_skip(message.text):
+        return
+
+    log_message(message.from_user.id if message.from_user else "channel", "text", message.text)
+
+    reply = await build_reply(message.text)
+    await message.reply(reply, disable_notification=True)
+
+
+@dp.channel_post(F.voice)
+@dp.channel_post(F.video_note)
+async def on_channel_voice(message: types.Message):
+    if message.chat.id != CHANNEL_ID:
+        return
+
+    file_id = message.voice.file_id if message.voice else message.video_note.file_id
+    full, short = await transcribe(file_id)
+
+    if should_skip(full):
+        return
+
+    log_message(message.from_user.id if message.from_user else "channel", "voice", full)
+
+    reply = await build_voice_reply(full)
+    if reply:
         await message.reply(reply, disable_notification=True)
+
 
 @dp.channel_post(F.photo)
 async def on_channel_photo(message: types.Message):
     if message.chat.id != CHANNEL_ID:
         return
+
+    if message.caption and should_skip(message.caption):
+        return
+
+    log_message(message.from_user.id if message.from_user else "channel", "photo", message.caption or "")
+
     file_id = message.photo[-1].file_id
     reply = await describe_image(file_id)
     await message.reply(reply, disable_notification=True)
+
+
+@dp.message(F.text.startswith("/weekly"))
+async def on_weekly(message: types.Message):
+    summary = await build_weekly_summary()
+    await message.answer(summary)
 
 
 # ─────────────────────────────────────────────────────────────
